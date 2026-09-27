@@ -1,0 +1,15 @@
+{
+  "name": "videocitofono-relay",
+  "version": "1.0.0",
+  "description": "WebSocket relay between the ESP32-S3 videocitofono and the companion app, plus Pushy call notifications",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}
