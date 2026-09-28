@@ -1,5 +1,5 @@
 /*
- * Videocitofono relay server (Render).
+ * Videodoorphone relay server (Render).
  *
  * Bridges the ESP32-S3 (on the home WiFi) and the companion app (on
  * cellular data), which cannot reach each other directly because both
@@ -12,6 +12,12 @@
  *       {"role":"app"}
  *   - Text frames after that are JSON control/event messages:
  *       ESP32 -> server : {"cmd":"call_request"}
+ *       app   -> server : {"cmd":"answer"}   (app explicitly answering a
+ *                                              call - the app may already
+ *                                              have been connected before
+ *                                              the call started, so this
+ *                                              is not inferred just from
+ *                                              the app's connection event)
  *       server -> ESP32 : {"event":"app_connected"}
  *       server -> ESP32 : {"event":"call_timeout"}
  *       app   -> server : {"cmd":"open_door"}
@@ -22,6 +28,14 @@
  *
  * Only one ESP32 and one app are expected at a time (single household
  * device). A new connection with the same role replaces the old one.
+ *
+ * GET /mjpeg: every video frame (0x01) received from the ESP32 is also
+ * broadcast here as a standard MJPEG multipart stream, so the app can just
+ * point a native WebViewer at this URL instead of needing a custom
+ * component to draw the video - the official MIT App Inventor Designer
+ * can't render a fully custom visible component (see the conversation this
+ * was built from), but any browser/WebView already knows how to display an
+ * MJPEG stream natively.
  */
 
 const http = require('http');
@@ -32,12 +46,60 @@ const PUSHY_API_KEY = process.env.PUSHY_API_KEY;
 const PUSHY_TOPIC = process.env.PUSHY_TOPIC || 'citofono_casa_marco';
 const CALL_TIMEOUT_MS = 60000;
 
+const MJPEG_BOUNDARY = 'videocitofonoframe';
+const mjpegClients = [];
+
 const server = http.createServer((req, res) => {
+  if (req.url === '/mjpeg') {
+    res.writeHead(200, {
+      'Content-Type': `multipart/x-mixed-replace; boundary=${MJPEG_BOUNDARY}`,
+      'Cache-Control': 'no-cache, no-store, must-revalidate',
+      'Pragma': 'no-cache',
+      'Connection': 'close'
+    });
+    mjpegClients.push(res);
+    log('MJPEG client connected, total:', mjpegClients.length);
+
+    req.on('close', () => {
+      const idx = mjpegClients.indexOf(res);
+      if (idx !== -1) {
+        mjpegClients.splice(idx, 1);
+      }
+      log('MJPEG client disconnected, total:', mjpegClients.length);
+    });
+    return;
+  }
+
   // Plain HTTP endpoint, useful for uptime pings (Render free tier sleeps
   // after inactivity) and as a quick health check.
   res.writeHead(200, { 'Content-Type': 'text/plain' });
   res.end('videocitofono relay ok\n');
 });
+
+function broadcastMjpegFrame(jpegBuffer) {
+  if (mjpegClients.length === 0) {
+    return;
+  }
+  const header = Buffer.from(
+    `--${MJPEG_BOUNDARY}\r\n` +
+    'Content-Type: image/jpeg\r\n' +
+    `Content-Length: ${jpegBuffer.length}\r\n\r\n`
+  );
+  const footer = Buffer.from('\r\n');
+
+  // Iterate backwards so a client removed mid-loop (on write error) doesn't
+  // shift the indices of the ones still to come.
+  for (let i = mjpegClients.length - 1; i >= 0; i--) {
+    const client = mjpegClients[i];
+    try {
+      client.write(header);
+      client.write(jpegBuffer);
+      client.write(footer);
+    } catch (err) {
+      mjpegClients.splice(i, 1);
+    }
+  }
+}
 
 const wss = new WebSocket.Server({ server, path: '/ws' });
 
@@ -112,15 +174,13 @@ function handleCallRequest() {
   }, CALL_TIMEOUT_MS);
 }
 
-function handleAppIdentified() {
+function handleAppAnswered(reason) {
   if (callState === 'calling') {
-    log('app connected, call answered');
+    log('call answered (' + reason + ')');
     clearCallTimeout();
     callState = 'in_call';
     sendJson(esp32Socket, { event: 'app_connected' });
   }
-  // If the app connects with no call in progress, nothing to do yet:
-  // it will just be ready to receive once a call_request comes in.
 }
 
 function handleOpenDoor() {
@@ -162,7 +222,12 @@ wss.on('connection', (socket) => {
           }
           appSocket = socket;
           log('App connected');
-          handleAppIdentified();
+          // Covers the common case: the app was closed, opened a fresh
+          // connection specifically in response to the call notification.
+          // If the app was already connected before the call started, it
+          // must send an explicit {"cmd":"answer"} instead (below) -
+          // connecting is not proof of answering in that case.
+          handleAppAnswered('app connection');
         }
         return;
       }
@@ -171,16 +236,27 @@ wss.on('connection', (socket) => {
         handleCallRequest();
       } else if (role === 'app' && msg.cmd === 'open_door') {
         handleOpenDoor();
+      } else if (role === 'app' && msg.cmd === 'answer') {
+        handleAppAnswered('explicit answer command');
       }
 
       return;
     }
 
-    // Binary media frame: relay as-is, leading type byte untouched.
+    // Binary media frame: relay as-is over the WebSocket, leading type byte
+    // untouched (kept for the WebSocket extension path / audio, which still
+    // uses it).
     if (role === 'esp32' && appSocket && appSocket.readyState === WebSocket.OPEN) {
       appSocket.send(data, { binary: true });
     } else if (role === 'app' && esp32Socket && esp32Socket.readyState === WebSocket.OPEN) {
       esp32Socket.send(data, { binary: true });
+    }
+
+    // Video frames (0x01) are also broadcast to any /mjpeg HTTP client,
+    // independent of whether an app WebSocket is connected - the type byte
+    // is stripped since MJPEG frames are just raw JPEG bytes.
+    if (role === 'esp32' && data.length > 0 && data[0] === 0x01) {
+      broadcastMjpegFrame(data.subarray(1));
     }
   });
 
