@@ -137,7 +137,11 @@ async function notifyPushy() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         to: PUSHY_TOPIC,
-        data: { message: 'Chiamata dal videocitofono' }
+        data: {
+          title: 'Videocitofono',
+          message: 'Chiamata dal videocitofono',
+          notificationId: Date.now().toString()
+        }
       })
     });
 
