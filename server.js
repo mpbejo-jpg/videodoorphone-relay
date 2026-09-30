@@ -136,7 +136,7 @@ async function notifyPushy() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        to: PUSHY_TOPIC,
+        to: `/topics/${PUSHY_TOPIC}`,
         data: {
           title: 'Videocitofono',
           message: 'Chiamata dal videocitofono',
