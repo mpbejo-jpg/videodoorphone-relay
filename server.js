@@ -43,7 +43,7 @@ const WebSocket = require('ws');
 
 const PORT = process.env.PORT || 10000;
 const PUSHY_API_KEY = process.env.PUSHY_API_KEY;
-const PUSHY_TOPIC = process.env.PUSHY_TOPIC || 'citofono_casa_marco';
+const PUSHY_TOPIC = process.env.PUSHY_TOPIC || 'MyHome';
 const CALL_TIMEOUT_MS = 60000;
 
 const MJPEG_BOUNDARY = 'videocitofonoframe';
@@ -138,8 +138,8 @@ async function notifyPushy() {
       body: JSON.stringify({
         to: `/topics/${PUSHY_TOPIC}`,
         data: {
-          title: 'Videocitofono',
-          message: 'Chiamata dal videocitofono',
+          title: 'Videodoorphone,
+          message: 'Incoming call',
           notificationId: Date.now().toString()
         }
       })
