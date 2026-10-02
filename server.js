@@ -73,7 +73,7 @@ const server = http.createServer((req, res) => {
   // Plain HTTP endpoint, useful for uptime pings (Render free tier sleeps
   // after inactivity) and as a quick health check.
   res.writeHead(200, { 'Content-Type': 'text/plain' });
-  res.end('videocitofono relay ok\n');
+  res.end('videodoorphone relay ok\n');
 });
 
 function broadcastMjpegFrame(jpegBuffer) {
@@ -138,7 +138,7 @@ async function notifyPushy() {
       body: JSON.stringify({
         to: `/topics/${PUSHY_TOPIC}`,
         data: {
-          title: 'Videodoorphone,
+          title: 'Videodoorphone',
           message: 'Incoming call',
           notificationId: Date.now().toString()
         }
